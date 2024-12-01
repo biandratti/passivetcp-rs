@@ -35,15 +35,43 @@ pub enum Type {
 }
 
 impl fmt::Display for Type {
-    /// Creates a default instance of the `Database` by parsing a configuration file
-    /// located at `config/p0f.fp`. This file is expected to define the default
-    /// signatures and mappings used for analysis.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
+impl Database {
+    /// Creates a new instance of the `Database`.
+    ///
+    /// # Arguments
+    ///
+    /// * `config_path` - An optional path to a configuration file. If `None`, the default
+    ///                   configuration file is used.
+    ///
+    /// # Returns
+    /// A `Database` instance initialized with the provided or default configuration.
+    pub fn new(config_path: Option<&str>) -> Self {
+        if let Some(path) = config_path {
+            std::fs::read_to_string(path)
+                .ok()
+                .and_then(|content| content.parse().ok())
+                .unwrap_or_else(|| {
+                    eprintln!(
+                        "Failed to load configuration from {}. Falling back to default.",
+                        path
+                    );
+                    Self::default()
+                })
+        } else {
+            Self::default()
+        }
+    }
+}
+
 impl Default for Database {
+    /// Creates a default instance of the `Database` by parsing a configuration file
+    /// located at `config/p0f.fp`. This file is expected to define the default
+    /// signatures and mappings used for analysis.
     fn default() -> Self {
         include_str!("../config/p0f.fp")
             .parse()
