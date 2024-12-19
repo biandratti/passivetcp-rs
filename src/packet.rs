@@ -1,5 +1,7 @@
+use crate::http_parser::{parse_http_request, ObservableHttpRequest};
 use crate::mtu;
-use crate::tcp::{IpVersion, PayloadSize, Quirk, Signature, TcpOption, Ttl, WindowSize};
+use crate::tcp;
+use crate::tcp::{IpVersion, PayloadSize, Quirk, TcpOption, Ttl, WindowSize};
 use crate::uptime::{check_ts_tcp, ObservableUptime};
 use crate::uptime::{Connection, SynData};
 use failure::{bail, err_msg, Error};
@@ -23,9 +25,10 @@ pub struct IpPort {
 }
 
 pub struct ObservableSignature {
-    pub signature: Signature,
+    pub signature: tcp::Signature,
     pub mtu: Option<u16>,
     pub uptime: Option<ObservableUptime>,
+    pub http_request: Option<ObservableHttpRequest>,
     pub source: IpPort,
     pub destination: IpPort,
     pub from_client: bool,
@@ -373,8 +376,11 @@ fn visit_tcp(
         (wsize, _) => WindowSize::Value(wsize),
     };
 
+    //TODO: WIP...
+    let observable_http_request = parse_http_request(tcp.payload());
+
     Ok(ObservableSignature {
-        signature: Signature {
+        signature: tcp::Signature {
             version,
             ittl,
             olen,
@@ -389,6 +395,7 @@ fn visit_tcp(
                 PayloadSize::NonZero
             },
         },
+        http_request: observable_http_request,
         mtu,
         uptime,
         source: IpPort {

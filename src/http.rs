@@ -10,6 +10,15 @@ pub struct Signature {
     pub expsw: String,
 }
 
+impl Signature {
+    pub fn matches(&self, db_signature: &Self) -> bool {
+        self.version.matches_version(&db_signature.version)
+            && self.horder == db_signature.horder
+            && self.habsent == db_signature.habsent
+            && self.expsw == db_signature.expsw
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Version {
     /// HTTP/1.0
@@ -18,6 +27,15 @@ pub enum Version {
     V11,
     /// HTTP/1.0 or HTTP/1.1
     Any,
+}
+
+impl Version {
+    pub fn matches_version(&self, other: &Version) -> bool {
+        matches!(
+            (self, other),
+            (Version::V10, Version::V10) | (Version::V11, Version::V11) | (_, Version::Any)
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -32,7 +50,8 @@ pub fn header<S: AsRef<str>>(name: S) -> Header {
     Header::new(name)
 }
 
-#[cfg(test)]
+//TODO: WIP
+//#[cfg(test)]
 impl Header {
     pub fn new<S: AsRef<str>>(name: S) -> Self {
         Header {

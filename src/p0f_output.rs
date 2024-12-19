@@ -1,27 +1,30 @@
 use crate::db::Label;
 use crate::packet::IpPort;
-use crate::tcp::{Signature, Ttl};
+use crate::tcp::Ttl;
+use crate::{http, tcp};
 use std::fmt;
+use std::fmt::Formatter;
 
 pub struct P0fOutput {
     pub syn: Option<SynTCPOutput>,
     pub syn_ack: Option<SynAckTCPOutput>,
     pub mtu: Option<MTUOutput>,
     pub uptime: Option<UptimeOutput>,
+    pub http_request: Option<HttpRequestOutput>,
 }
 
 pub struct SynTCPOutput {
     pub source: IpPort,
     pub destination: IpPort,
     pub label: Option<Label>,
-    pub sig: Signature,
+    pub sig: tcp::Signature,
 }
 
 pub struct SynAckTCPOutput {
     pub source: IpPort,
     pub destination: IpPort,
     pub label: Option<Label>,
-    pub sig: Signature,
+    pub sig: tcp::Signature,
 }
 
 impl fmt::Display for SynTCPOutput {
@@ -148,6 +151,42 @@ impl fmt::Display for UptimeOutput {
             self.min,
             self.up_mod_days,
             self.freq,
+        )
+    }
+}
+
+pub struct HttpRequestOutput {
+    pub source: IpPort,
+    pub destination: IpPort,
+    pub lang: Option<String>,
+    pub user_agent: Option<String>,
+    pub label: Option<Label>,
+    pub sig: http::Signature,
+}
+
+impl fmt::Display for HttpRequestOutput {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            ".-[ {}/{} -> {}/{} (http request) ]-\n\
+            |\n\
+            | client   = {}\n\
+            | app      = {}\n\
+            | lang     = {}\n\
+            | params   = {}\n\
+            | raw_sig  = {}\n\
+            `----\n",
+            self.source.ip,
+            self.source.port,
+            self.destination.ip,
+            self.destination.port,
+            self.source.ip,
+            self.user_agent.as_deref().unwrap_or("???"),
+            self.lang.as_deref().unwrap_or("???"),
+            self.label
+                .as_ref()
+                .map_or("none".to_string(), |l| l.ty.to_string()),
+            self.sig,
         )
     }
 }

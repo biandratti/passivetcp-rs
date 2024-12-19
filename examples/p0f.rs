@@ -70,16 +70,19 @@ fn main() {
 
     for output in receiver {
         if let Some(syn) = output.syn {
-            info!("{}", syn);
+            debug!("{}", syn);
         }
         if let Some(syn_ack) = output.syn_ack {
-            info!("{}", syn_ack);
+            debug!("{}", syn_ack);
         }
         if let Some(mtu) = output.mtu {
-            info!("{}", mtu);
+            debug!("{}", mtu);
         }
         if let Some(uptime) = output.uptime {
-            info!("{}", uptime);
+            debug!("{}", uptime);
+        }
+        if let Some(http_request) = output.http_request {
+            info!("{}", http_request);
         }
     }
 }
