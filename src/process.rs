@@ -12,6 +12,7 @@ use pnet::packet::{
 };
 use std::net::IpAddr;
 use ttl_cache::TtlCache;
+use crate::http_process::ObservableHttpRequest;
 
 #[derive(Clone)]
 pub struct IpPort {
@@ -26,6 +27,7 @@ pub struct ObservablePackage {
     pub tcp_response: Option<ObservableTcp>,
     pub mtu: Option<ObservableMtu>,
     pub uptime: Option<ObservableUptime>,
+    pub http_request: Option<ObservableHttpRequest>,
 }
 impl ObservablePackage {
     pub fn extract(

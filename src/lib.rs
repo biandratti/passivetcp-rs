@@ -9,9 +9,10 @@ mod signature_matcher;
 mod tcp;
 mod tcp_process;
 mod uptime;
+mod http_process;
 
 use crate::db::Database;
-use crate::p0f_output::{MTUOutput, P0fOutput, SynAckTCPOutput, SynTCPOutput, UptimeOutput};
+use crate::p0f_output::{HttpRequestOutput, MTUOutput, P0fOutput, SynAckTCPOutput, SynTCPOutput, UptimeOutput};
 use crate::process::ObservablePackage;
 use crate::signature_matcher::SignatureMatcher;
 use crate::uptime::{Connection, SynData};
@@ -109,7 +110,7 @@ impl<'a> P0f<'a> {
     fn analyze_tcp(&mut self, packet: &[u8]) -> P0fOutput {
         match ObservablePackage::extract(packet, &mut self.cache) {
             Ok(observable_package) => {
-                let (syn, syn_ack, mtu, uptime) = {
+                let (syn, syn_ack, mtu, uptime, http_request) = {
                     let mtu: Option<MTUOutput> =
                         observable_package.mtu.and_then(|observable_mtu| {
                             self.matcher
@@ -159,7 +160,21 @@ impl<'a> P0f<'a> {
                             freq: update.freq,
                         });
 
-                    (syn, syn_ack, mtu, uptime)
+                    let http_request = observable_package.http_request.map(|http_request| {
+                        HttpRequestOutput {
+                            source: observable_package.source.clone(),
+                            destination: observable_package.destination.clone(),
+                            lang: http_request.lang,
+                            user_agent: http_request.user_agent,
+                            label: self
+                                .matcher
+                                .matching_by_http_request(&http_request.signature)
+                                .map(|(label, _)| label.clone()),
+                            sig: http_request.signature,
+                        }
+                    });
+
+                    (syn, syn_ack, mtu, uptime, http_request)
                 };
 
                 P0fOutput {
@@ -167,6 +182,7 @@ impl<'a> P0f<'a> {
                     syn_ack,
                     mtu,
                     uptime,
+                    http_request
                 }
             }
             Err(error) => {
@@ -176,6 +192,7 @@ impl<'a> P0f<'a> {
                     syn_ack: None,
                     mtu: None,
                     uptime: None,
+                    http_request: None,
                 }
             }
         }
