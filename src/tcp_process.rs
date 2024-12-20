@@ -7,7 +7,6 @@ use crate::uptime::{check_ts_tcp, ObservableUptime};
 use crate::uptime::{Connection, SynData};
 use failure::{bail, err_msg, Error};
 use pnet::packet::{
-    ip::IpNextHeaderProtocols,
     ipv4::{Ipv4Flags, Ipv4Packet},
     ipv6::Ipv6Packet,
     tcp::{TcpFlags, TcpOptionNumbers::*, TcpOptionPacket, TcpPacket},
@@ -33,17 +32,11 @@ fn from_client(tcp_flags: u8) -> bool {
     tcp_flags & TcpFlags::SYN != 0 && tcp_flags & TcpFlags::ACK == 0
 }
 
-pub fn visit_ipv4(
+pub fn process_tcp_ipv4(
     cache: &mut TtlCache<Connection, SynData>,
-    packet: Ipv4Packet,
+    packet: &Ipv4Packet,
 ) -> Result<ObservablePackage, Error> {
-    if packet.get_next_level_protocol() != IpNextHeaderProtocols::Tcp {
-        bail!(
-            "unsupported IPv4 packet with non-TCP payload: {}",
-            packet.get_next_level_protocol()
-        );
-    }
-
+    //if packet.get_next_header() == IpNextHeaderProtocols::Tcp {} //TODO: WIP
     if packet.get_fragment_offset() > 0
         || (packet.get_flags() & Ipv4Flags::MoreFragments) == Ipv4Flags::MoreFragments
     {
@@ -98,17 +91,11 @@ pub fn visit_ipv4(
         })
 }
 
-pub fn visit_ipv6(
+pub fn process_tcp_ipv6(
     cache: &mut TtlCache<Connection, SynData>,
-    packet: Ipv6Packet,
+    packet: &Ipv6Packet,
 ) -> Result<ObservablePackage, Error> {
-    if packet.get_next_header() != IpNextHeaderProtocols::Tcp {
-        bail!(
-            "unsuppport IPv6 packet with non-TCP payload: {}",
-            packet.get_next_header()
-        );
-    }
-
+    //if packet.get_next_header() == IpNextHeaderProtocols::Tcp {} //TODO: WIP
     let version = IpVersion::V6;
     let ttl_value: u8 = packet.get_hop_limit();
     let ttl = Ttl::Distance(ttl_value, guess_dist(ttl_value)); // TODO: WIP
@@ -364,5 +351,6 @@ fn visit_tcp(
             ip: destination_ip,
             port: destination_port,
         },
+        http_request: None,
     })
 }

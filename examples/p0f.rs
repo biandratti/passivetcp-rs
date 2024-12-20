@@ -81,5 +81,8 @@ fn main() {
         if let Some(uptime) = output.uptime {
             info!("{}", uptime);
         }
+        if let Some(http_request) = output.http_request {
+            info!("{}", http_request);
+        }
     }
 }

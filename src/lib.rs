@@ -2,6 +2,7 @@ pub mod db;
 mod db_parse;
 mod display;
 mod http;
+mod http_process;
 mod mtu;
 mod p0f_output;
 mod process;
@@ -11,7 +12,10 @@ mod tcp_process;
 mod uptime;
 
 use crate::db::Database;
-use crate::p0f_output::{MTUOutput, P0fOutput, SynAckTCPOutput, SynTCPOutput, UptimeOutput};
+use crate::http_process::{FlowKey, TcpFlow};
+use crate::p0f_output::{
+    HttpRequestOutput, MTUOutput, P0fOutput, SynAckTCPOutput, SynTCPOutput, UptimeOutput,
+};
 use crate::process::ObservablePackage;
 use crate::signature_matcher::SignatureMatcher;
 use crate::uptime::{Connection, SynData};
@@ -23,7 +27,8 @@ use ttl_cache::TtlCache;
 
 pub struct P0f<'a> {
     pub matcher: SignatureMatcher<'a>,
-    cache: TtlCache<Connection, SynData>,
+    tcp_cache: TtlCache<Connection, SynData>,
+    http_cache: TtlCache<FlowKey, TcpFlow>,
 }
 
 /// A passive TCP fingerprinting engine inspired by `p0f`.
@@ -41,8 +46,13 @@ impl<'a> P0f<'a> {
     /// A new `P0f` instance initialized with the given database and cache capacity.
     pub fn new(database: &'a Database, cache_capacity: usize) -> Self {
         let matcher: SignatureMatcher = SignatureMatcher::new(database);
-        let cache: TtlCache<Connection, SynData> = TtlCache::new(cache_capacity);
-        Self { matcher, cache }
+        let tcp_cache: TtlCache<Connection, SynData> = TtlCache::new(cache_capacity);
+        let http_cache: TtlCache<FlowKey, TcpFlow> = TtlCache::new(cache_capacity);
+        Self {
+            matcher,
+            tcp_cache,
+            http_cache,
+        }
     }
 
     /// Captures and analyzes packets on the specified network interface.
@@ -107,9 +117,9 @@ impl<'a> P0f<'a> {
     }
 
     fn analyze_tcp(&mut self, packet: &[u8]) -> P0fOutput {
-        match ObservablePackage::extract(packet, &mut self.cache) {
+        match ObservablePackage::extract(packet, &mut self.tcp_cache, &mut self.http_cache) {
             Ok(observable_package) => {
-                let (syn, syn_ack, mtu, uptime) = {
+                let (syn, syn_ack, mtu, uptime, http_request) = {
                     let mtu: Option<MTUOutput> =
                         observable_package.mtu.and_then(|observable_mtu| {
                             self.matcher
@@ -159,7 +169,22 @@ impl<'a> P0f<'a> {
                             freq: update.freq,
                         });
 
-                    (syn, syn_ack, mtu, uptime)
+                    let http_request =
+                        observable_package
+                            .http_request
+                            .map(|http_request| HttpRequestOutput {
+                                source: observable_package.source.clone(),
+                                destination: observable_package.destination.clone(),
+                                lang: http_request.lang,
+                                user_agent: http_request.user_agent,
+                                label: self
+                                    .matcher
+                                    .matching_by_http_request(&http_request.signature)
+                                    .map(|(label, _)| label.clone()),
+                                sig: http_request.signature,
+                            });
+
+                    (syn, syn_ack, mtu, uptime, http_request)
                 };
 
                 P0fOutput {
@@ -167,6 +192,7 @@ impl<'a> P0f<'a> {
                     syn_ack,
                     mtu,
                     uptime,
+                    http_request,
                 }
             }
             Err(error) => {
@@ -176,6 +202,7 @@ impl<'a> P0f<'a> {
                     syn_ack: None,
                     mtu: None,
                     uptime: None,
+                    http_request: None,
                 }
             }
         }
