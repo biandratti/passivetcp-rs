@@ -82,12 +82,10 @@ impl Default for Database {
 
 #[cfg(test)]
 mod tests {
+    use crate::db::Database;
 
-    #[cfg(feature = "parse")]
     #[test]
     fn test_default_database() {
-        let _ = pretty_env_logger::try_init();
-
         let db = Database::default();
 
         assert_eq!(db.classes, vec!["win", "unix", "other"]);
