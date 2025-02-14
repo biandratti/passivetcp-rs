@@ -43,14 +43,14 @@ pub fn check_ts_tcp(
     from_client: bool,
     ts_val: u32,
 ) -> Option<ObservableUptime> {
-    let syn_data: Option<&SynData> = if !from_client {
+    let syn_data: Option<SynData> = if !from_client {
         let client_connection = Connection {
             src_ip: connection.dst_ip,
             src_port: connection.dst_port,
             dst_ip: connection.src_ip,
             dst_port: connection.src_port,
         };
-        cache.get(&client_connection)
+        cache.remove(&client_connection)
     } else {
         cache.insert(
             connection.clone(),

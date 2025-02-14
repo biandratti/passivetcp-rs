@@ -101,9 +101,26 @@ pub fn process_ipv4(
             packet.get_next_level_protocol()
         );
     }
-    let http_response = http_process::process_http_ipv4(&packet, http_cache);
-    let tcp_response = tcp_process::process_tcp_ipv4(tcp_cache, &packet);
-    handle_http_tcp_responses(http_response, tcp_response)
+
+    let packet_data = packet.packet().to_vec();
+
+    crossbeam::scope(|s| {
+        let http_handle = s.spawn(|_| {
+            let packet = Ipv4Packet::new(&packet_data).unwrap();
+            http_process::process_http_ipv4(&packet, http_cache)
+        });
+
+        let tcp_handle = s.spawn(|_| {
+            let packet = Ipv4Packet::new(&packet_data).unwrap();
+            tcp_process::process_tcp_ipv4(tcp_cache, &packet)
+        });
+
+        let http_response = http_handle.join().unwrap();
+        let tcp_response = tcp_handle.join().unwrap();
+
+        handle_http_tcp_responses(http_response, tcp_response)
+    })
+    .unwrap()
 }
 
 pub fn process_ipv6(
@@ -117,9 +134,26 @@ pub fn process_ipv6(
             packet.get_next_header()
         );
     }
-    let http_response = http_process::process_http_ipv6(&packet, http_cache);
-    let tcp_response = tcp_process::process_tcp_ipv6(tcp_cache, &packet);
-    handle_http_tcp_responses(http_response, tcp_response)
+
+    let packet_data = packet.packet().to_vec();
+
+    crossbeam::scope(|s| {
+        let http_handle = s.spawn(|_| {
+            let packet = Ipv6Packet::new(&packet_data).unwrap();
+            http_process::process_http_ipv6(&packet, http_cache)
+        });
+
+        let tcp_handle = s.spawn(|_| {
+            let packet = Ipv6Packet::new(&packet_data).unwrap();
+            tcp_process::process_tcp_ipv6(tcp_cache, &packet)
+        });
+
+        let http_response = http_handle.join().unwrap();
+        let tcp_response = tcp_handle.join().unwrap();
+
+        handle_http_tcp_responses(http_response, tcp_response)
+    })
+    .unwrap()
 }
 
 fn handle_http_tcp_responses(
