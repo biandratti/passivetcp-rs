@@ -103,6 +103,10 @@ pub fn process_tcp_ipv4(
 
     let ip_package_header_length: u8 = packet.get_header_length();
 
+    let total_ip_length = packet.get_total_length();
+
+    let packet_ip_id = Some(packet.get_identification());
+
     TcpPacket::new(tcp_payload)
         .ok_or_else(|| PassiveTcpError::UnexpectedPackage("TCP packet too short".to_string()))
         .and_then(|tcp_packet| {
@@ -112,7 +116,9 @@ pub fn process_tcp_ipv4(
                 version,
                 ttl,
                 ip_package_header_length,
+                total_ip_length,
                 olen,
+                packet_ip_id,
                 quirks,
                 source_ip,
                 destination_ip,
@@ -145,6 +151,10 @@ pub fn process_tcp_ipv6(
 
     let ip_package_header_length: u8 = 40; //IPv6 header is always 40 bytes
 
+    let total_ip_length = packet.get_payload_length() + 40;
+
+    let packet_ip_id = None;
+
     TcpPacket::new(packet.payload())
         .ok_or_else(|| PassiveTcpError::UnexpectedPackage("TCP packet too short".to_string()))
         .and_then(|tcp_packet| {
@@ -154,7 +164,9 @@ pub fn process_tcp_ipv6(
                 version,
                 ttl,
                 ip_package_header_length,
+                total_ip_length,
                 olen,
+                packet_ip_id,
                 quirks,
                 source_ip,
                 destination_ip,
@@ -169,7 +181,9 @@ fn visit_tcp(
     version: IpVersion,
     ittl: Ttl,
     ip_package_header_length: u8,
+    ip_total_packet_length: u16,
     olen: u8,
+    raw_ip_id: Option<u16>,
     mut quirks: Vec<Quirk>,
     source_ip: IpAddr,
     destination_ip: IpAddr,
@@ -232,6 +246,7 @@ fn visit_tcp(
     let mut mss = None;
     let mut wscale = None;
     let mut olayout = vec![];
+    let mut timestamp = None;
     let mut uptime: Option<ObservableUptime> = None;
 
     while let Some(opt) = TcpOptionPacket::new(buf) {
@@ -293,41 +308,55 @@ fn visit_tcp(
                 olayout.push(TcpOption::TS);
 
                 if data.len() >= 4 {
-                    let ts_val_bytes: [u8; 4] = data[..4].try_into().map_err(|_| {
+                    let ts_val_bytes_for_quirk: [u8; 4] = data[..4].try_into().map_err(|_| {
                         PassiveTcpError::Parse(
-                            "Failed to convert slice to array for timestamp value".to_string(),
+                            "Failed to convert slice to array for timestamp value (quirk check)"
+                                .to_string(),
                         )
                     })?;
-                    if u32::from_ne_bytes(ts_val_bytes) == 0 {
+                    if u32::from_ne_bytes(ts_val_bytes_for_quirk) == 0 {
                         quirks.push(Quirk::OwnTimestampZero);
                     }
                 }
 
-                if data.len() >= 8 && tcp_type == SYN {
-                    let ts_peer_bytes: [u8; 4] = data[4..8].try_into().map_err(|_| {
-                        PassiveTcpError::Parse(
-                            "Failed to convert slice to array for peer timestamp value".to_string(),
-                        )
-                    })?;
-                    if u32::from_ne_bytes(ts_peer_bytes) != 0 {
-                        quirks.push(Quirk::PeerTimestampNonZero);
-                    }
-                }
-
                 if data.len() >= 8 {
+                    if tcp_type == SYN {
+                        let ts_peer_bytes_for_quirk: [u8; 4] = data[4..8].try_into().map_err(|_| {
+                            PassiveTcpError::Parse(
+                                "Failed to convert slice to array for peer timestamp value (quirk check)".to_string(),
+                            )
+                        })?;
+                        if u32::from_ne_bytes(ts_peer_bytes_for_quirk) != 0 {
+                            quirks.push(Quirk::PeerTimestampNonZero);
+                        }
+                    }
+
                     let ts_val_bytes: [u8; 4] = data[..4].try_into().map_err(|_| {
                         PassiveTcpError::Parse(
                             "Failed to convert slice to array for timestamp value".to_string(),
                         )
                     })?;
-                    let ts_val: u32 = u32::from_ne_bytes(ts_val_bytes);
+                    let ts_val_extracted: u32 = u32::from_ne_bytes(ts_val_bytes);
+
+                    let ts_ecr_bytes: [u8; 4] = data[4..8].try_into().map_err(|_| {
+                        PassiveTcpError::Parse(
+                            "Failed to convert slice to array for timestamp echo reply value"
+                                .to_string(),
+                        )
+                    })?;
+                    let ts_ecr_extracted: u32 = u32::from_ne_bytes(ts_ecr_bytes);
+                    timestamp = Some(tcp::Timestamp {
+                        tsval: Some(ts_val_extracted),
+                        tsecr: Some(ts_ecr_extracted),
+                    });
+
                     let connection: Connection = Connection {
                         src_ip: source_ip,
                         src_port: tcp.get_source(),
                         dst_ip: destination_ip,
                         dst_port: tcp.get_destination(),
                     };
-                    uptime = check_ts_tcp(cache, &connection, from_client, ts_val);
+                    uptime = check_ts_tcp(cache, &connection, from_client, ts_val_extracted);
                 }
 
                 /*if data.len() != 10 {
@@ -350,6 +379,8 @@ fn visit_tcp(
         _ => None,
     };
 
+    let tcp_data_offset_val = tcp.get_data_offset();
+
     let wsize: WindowSize = detect_win_multiplicator(
         tcp.get_window(),
         mss.unwrap_or(0),
@@ -358,32 +389,38 @@ fn visit_tcp(
         &version,
     );
 
-    let tcp_signature: ObservableTcp = ObservableTcp {
-        signature: tcp::Signature {
-            version,
-            ittl,
-            olen,
-            mss,
-            wsize,
-            wscale,
-            olayout,
-            quirks,
-            pclass: if tcp.payload().is_empty() {
-                PayloadSize::Zero
-            } else {
-                PayloadSize::NonZero
-            },
+    let tcp_signature_struct = tcp::Signature {
+        version,
+        ittl,
+        olen,
+        mss,
+        wsize,
+        wscale,
+        olayout,
+        quirks,
+        pclass: if tcp.payload().is_empty() {
+            PayloadSize::Zero
+        } else {
+            PayloadSize::NonZero
         },
+        timestamp,
+        ip_total_length: Some(ip_total_packet_length),
+        tcp_header_len_words: Some(tcp_data_offset_val),
+        ip_id: raw_ip_id,
+    };
+
+    let observable_tcp = ObservableTcp {
+        signature: tcp_signature_struct,
     };
 
     Ok(ObservableTCPPackage {
         tcp_request: if from_client {
-            Some(tcp_signature.clone())
+            Some(observable_tcp.clone())
         } else {
             None
         },
         tcp_response: if !from_client {
-            Some(tcp_signature)
+            Some(observable_tcp)
         } else {
             None
         },
