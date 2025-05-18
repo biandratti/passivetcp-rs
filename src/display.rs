@@ -87,9 +87,9 @@ mod tcp {
 
     impl fmt::Display for WindowSize {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            use WindowSize::*;
+            use crate::tcp::WindowSizeType::*;
 
-            match self {
+            match self.ty {
                 Mss(n) => write!(f, "mss*{}", n),
                 Mtu(n) => write!(f, "mtu*{}", n),
                 Value(n) => write!(f, "{}", n),

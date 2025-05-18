@@ -17,10 +17,29 @@ pub struct Signature {
     pub wscale: Option<u8>,
     /// layout and ordering of TCP options, if any.
     pub olayout: Vec<TcpOption>,
-    /// properties and quirks observed in IP or TCP headers.
-    pub quirks: Vec<Quirk>,
     /// payload size classification
     pub pclass: PayloadSize,
+    /// timestamp values
+    pub timestamp: Option<Timestamp>,
+    /// Raw IP Total Length.
+    pub ip_total_length: Option<u16>,
+    /// Raw TCP Data Offset (header length in 32-bit words).
+    pub tcp_header_len_words: Option<u8>,
+    /// Raw IP ID.  identification field and is primarily used for uniquely identifying the group of fragments of a single IP datagram
+    /// It is required only in ip v4.
+    pub ip_id: Option<u16>,
+    /// Raw TCP flags value from the packet (e.g., SYN=2, SYN+ECE+CWR=194)
+    pub tcp_raw_flags: Option<u8>,
+    /// Derived properties and quirks (p0f style)
+    pub quirks: Vec<Quirk>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Timestamp {
+    /// timestamp value
+    pub tsval: Option<u32>,
+    /// timestamp echo reply
+    pub tsecr: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,9 +257,15 @@ impl Ttl {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowSize {
+    pub raw: Option<u16>,
+    pub ty: WindowSizeType,
+}
+
 /// TCP Window Size representation used for fingerprinting different TCP stacks
 #[derive(Clone, Debug, PartialEq)]
-pub enum WindowSize {
+pub enum WindowSizeType {
     /// Window size is a multiple of MSS (Maximum Segment Size)
     /// The u8 value represents the multiplier (e.g., Mss(4) means window = MSS * 4)
     Mss(u8),
@@ -262,29 +287,28 @@ pub enum WindowSize {
 }
 
 impl WindowSize {
-    // Function to calculate the distance between two window sizes
     pub fn distance_window_size(&self, other: &WindowSize, mss: Option<u16>) -> Option<u32> {
-        match (self, other) {
-            (WindowSize::Mss(a), WindowSize::Mss(b)) => {
+        match (&self.ty, &other.ty) {
+            (WindowSizeType::Mss(a), WindowSizeType::Mss(b)) => {
                 if a == b {
                     Some(TcpMatchQuality::High.as_score())
                 } else {
                     Some(TcpMatchQuality::Low.as_score())
                 }
             }
-            (WindowSize::Mtu(a), WindowSize::Mtu(b)) => {
+            (WindowSizeType::Mtu(a), WindowSizeType::Mtu(b)) => {
                 if a == b {
                     Some(TcpMatchQuality::High.as_score())
                 } else {
                     Some(TcpMatchQuality::Low.as_score())
                 }
             }
-            (WindowSize::Value(a), WindowSize::Mss(b)) => {
+            (WindowSizeType::Value(a), WindowSizeType::Mss(b)) => {
                 if let Some(mss_value) = mss {
                     let ratio_other = a / mss_value;
                     if *b as u16 == ratio_other {
                         debug!(
-                            "window size difference: a {}, b {} == ratio_other {}",
+                            "window size difference: observed_value {}, db_mss_multiplier {} == ratio_other {}",
                             a, b, ratio_other
                         );
                         Some(TcpMatchQuality::High.as_score())
@@ -295,14 +319,16 @@ impl WindowSize {
                     Some(TcpMatchQuality::Low.as_score())
                 }
             }
-            (WindowSize::Mod(a), WindowSize::Mod(b)) => {
+            (WindowSizeType::Mod(a), WindowSizeType::Mod(b)) => {
                 if a == b {
                     Some(TcpMatchQuality::High.as_score())
                 } else {
                     Some(TcpMatchQuality::Low.as_score())
                 }
             }
-            (_, WindowSize::Any) | (WindowSize::Any, _) => Some(TcpMatchQuality::High.as_score()),
+            (_, WindowSizeType::Any) | (WindowSizeType::Any, _) => {
+                Some(TcpMatchQuality::High.as_score())
+            }
             _ => None,
         }
     }
